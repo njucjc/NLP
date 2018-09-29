@@ -23,14 +23,8 @@ public class Dict {
         return dictMap.containsKey(str);
     }
 
-    public String lookup(String word) {
-        Word w = dictMap.get(word);
-        if (w != null) {
-            return  w.toString();
-        }
-        else {
-            return null;
-        }
+    public Word lookup(String word) {
+        return dictMap.get(word);
     }
 
     public void print() {

@@ -22,6 +22,10 @@ public class Word {
         this.word = elements[0];
     }
 
+    public boolean isVerb() {
+        return explains.containsKey("v.") || explains.containsKey("vi.") || explains.containsKey("vt.");
+    }
+
 
     @Override
     public String toString() {

@@ -4,6 +4,7 @@ package cn.edu.nju;
 import cn.edu.nju.converter.Converter;
 import cn.edu.nju.converter.RuleBasedConverter;
 import cn.edu.nju.dict.Dict;
+import cn.edu.nju.dict.Word;
 
 import java.util.List;
 import java.util.Scanner;
@@ -18,23 +19,34 @@ public class Main {
 
 			do {
 				System.out.print("Please input a word >> ");
-				String word = input.nextLine();
-				List<String> tmp = converter.convert(word);
-				tmp.add(word);
+				String in = input.nextLine();
+				List<String> tmp = converter.convert(in);
+
+
+				tmp.add(in);
 
 				boolean isFind = false;
 
 				for(String str : tmp) {
 					boolean isWord = dict.isWord(str);
-					isFind |= isWord;
-
 					if(isWord) {
-						System.out.println(dict.lookup(str));
+						Word w = dict.lookup(str);
+						if(in.endsWith("ing") || in.endsWith("ed")) {
+							if(w.isVerb() || str.equals(in)) {
+								isFind = true;
+								System.out.println(w);
+							}
+						}
+						else {
+							isFind = true;
+							System.out.println(w);
+						}
+
 					}
 				}
 
 				if(!isFind) {
-					System.out.println("Sorry, " + "'" + word + "'" + " is not a word.");
+					System.out.println("Sorry, " + "'" + in + "'" + " is not a word.");
 				}
 
 			}while (true);
