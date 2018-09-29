@@ -14,7 +14,7 @@ public class Dict {
         List<String> dictList = FileHelper.readFile(filePath);
 
         for(String pattern : dictList) {
-            String [] elements = pattern.split("�");
+            String [] elements = pattern.split("\uF8F5");
             dictMap.put(elements[0], new Word(elements));
         }
     }

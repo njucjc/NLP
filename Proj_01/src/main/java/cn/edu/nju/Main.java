@@ -13,7 +13,6 @@ public class Main {
 		if(args.length >= 2) {
 			Converter converter = new RuleBasedConverter(args[0]);
 			Dict dict = new Dict(args[1]);
-		//	dict.print();
 
 			Scanner input = new Scanner(System.in);
 

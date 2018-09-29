@@ -29,7 +29,7 @@ public class Word {
 
         for(String key : explains.keySet()) {
             str.append(key);
-            str.append(" ");
+            str.append("\t");
             str.append(explains.get(key));
             str.append("\n");
         }
