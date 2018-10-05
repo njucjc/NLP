@@ -55,7 +55,7 @@ public class RuleBasedConverter implements Converter {
 
             if(word.length() > 4) { // *??ed -> *? (PAST)(VEN)
                 String sub = word.substring(0, word.length() - 3);
-                if(sub.charAt(sub.length() - 1) == word.charAt(sub.length() - 3)) {
+                if(sub.charAt(sub.length() - 1) == word.charAt(word.length() - 3)) {
                     res.add(sub);
                 }
             }
