@@ -20,6 +20,11 @@ public class Main {
 			do {
 				System.out.print("Please input a word >> ");
 				String in = input.nextLine();
+
+				if("exit()".equals(in)) {
+					break;
+				}
+
 				List<String> tmp = converter.convert(in);
 
 
