@@ -1,28 +1,23 @@
 package cn.edu.nju.cfg;
 
+import cn.edu.nju.position.Position;
+
 public class NonActiveEdge {
 
     String symbol;
 
-    int leftPos;
+    Position pos;
 
-    int rightPos;
-
-    public NonActiveEdge(String symbol, int leftPos, int rightPos) {
+    public NonActiveEdge(String symbol, Position pos) {
         this.symbol = symbol;
-        this.leftPos = leftPos;
-        this.rightPos = rightPos;
+        this.pos = pos;
     }
 
     public String getSymbol() {
         return symbol;
     }
 
-    public int getLeftPos() {
-        return leftPos;
-    }
-
-    public int getRightPos() {
-        return rightPos;
+    public Position getPos() {
+        return this.pos;
     }
 }

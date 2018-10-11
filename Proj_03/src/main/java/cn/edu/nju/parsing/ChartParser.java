@@ -10,7 +10,7 @@ import cn.edu.nju.dict.Dict;
 import java.util.List;
 import java.util.Stack;
 
-public class ChartParsing {
+public class ChartParser {
 
     Grammer grammer;
 
@@ -23,7 +23,7 @@ public class ChartParsing {
  //   List<NonActiveEdge> nonActiveEdgeList;
 
 
-    public ChartParsing(String dictFilePath, String irregFilePath, String rulePath) {
+    public ChartParser(String dictFilePath, String irregFilePath, String rulePath) {
 
         this.grammer = new Grammer(rulePath);
 

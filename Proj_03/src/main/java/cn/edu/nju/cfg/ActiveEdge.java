@@ -1,17 +1,22 @@
 package cn.edu.nju.cfg;
 
+import cn.edu.nju.position.Position;
+
 public class ActiveEdge {
 
     Rule rule;
 
-    int position;
+    int index;
 
-    public ActiveEdge(Rule rule) {
+    Position pos;
+
+    public ActiveEdge(Rule rule, Position pos) {
         this.rule = rule;
-        this.position = 0;
+        this.pos = pos;
+        this.index = 0;
     }
 
     public boolean isDone() {
-        return position == rule.getRight().length - 1;
+        return index == rule.getRight().length - 1;
     }
 }
