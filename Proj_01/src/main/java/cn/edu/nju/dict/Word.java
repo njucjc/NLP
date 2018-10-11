@@ -26,6 +26,10 @@ public class Word {
         return explains.containsKey("v.") || explains.containsKey("vi.") || explains.containsKey("vt.");
     }
 
+    public Set<String> getProperties() {
+        return explains.keySet();
+    }
+
 
     @Override
     public String toString() {
