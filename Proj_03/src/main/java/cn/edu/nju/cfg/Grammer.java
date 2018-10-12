@@ -11,14 +11,16 @@ public class Grammer {
     public Grammer(String ruleFilePath) {
         List<String> ruleStrs = FileHelper.readFile(ruleFilePath);
 
+        int count = 0;
         for(String str : ruleStrs) {
             String [] first = str.split("->");
             String [] second = first[1].split(" ");
-            ruleList.add(new Rule(first[0], second));
+            ruleList.add(new Rule(first[0], second, count));
+            count++;
         }
     }
 
-    public List<Rule> getRulesByRight(String right) {
+    public List<Rule> getRulesByFirstRight(String right) {
         List<Rule> res = new ArrayList<>();
         for(Rule rule : ruleList) {
             if(rule.getRight()[0].equals(right)) {
@@ -37,6 +39,10 @@ public class Grammer {
         }
         return res;
 
+    }
+
+    public Rule getRuleByNo(int no) {
+        return ruleList.get(no);
     }
 
     @Override

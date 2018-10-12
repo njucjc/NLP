@@ -11,19 +11,25 @@ public class Position {
         this.end = end;
     }
 
-    public int getStart() {
-        return start;
+    public Position(Position p) {
+        this.start = p.start;
+        this.end = p.end;
     }
 
-    public void setStart(int start) {
-        this.start = start;
+    public int getStart() {
+        return start;
     }
 
     public int getEnd() {
         return end;
     }
 
-    public void setEnd(int end) {
-        this.end = end;
+    @Override
+    public boolean equals(Object obj) {
+        if(obj instanceof Position) {
+            Position p = (Position) obj;
+            return p.start == start && p.end == end;
+        }
+        return false;
     }
 }

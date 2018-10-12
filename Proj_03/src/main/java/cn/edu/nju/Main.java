@@ -1,13 +1,33 @@
 package cn.edu.nju;
 
-import cn.edu.nju.converter.Converter;
-import cn.edu.nju.converter.RuleBasedConverter;
-import cn.edu.nju.dict.Dict;
+
+import cn.edu.nju.parser.ChartParser;
+
+import java.util.Scanner;
 
 public class Main {
     public static void main(String[] args) {
-        Dict dict = new Dict(args[0]); //dic_ec.txt
-        Converter converter = new RuleBasedConverter(args[1]); //irregular_verbs.txt
+//        if(args.length == 3) {
+//
+//            ChartParser chartParser = new ChartParser(args[0], args[1], args[2]);
+//
+//            do {
+//                Scanner input = new Scanner(System.in);
+//                String s = input.nextLine();
+//                if("exit()".equals(s)) {
+//                    break;
+//                }
+//
+//                chartParser.parsing(s);
+//
+//            }while (true);
+//        }
+//        else {
+//            System.out.println("Usage: java Main dict.txt irregular_verb.txt rule.txt");
+//        }
+
+        ChartParser chartParser = new ChartParser(args[0], args[1], args[2]);
+        chartParser.parsing("the cat caught a mouse");
 
         
     }
