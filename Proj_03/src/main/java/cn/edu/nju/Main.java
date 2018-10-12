@@ -12,6 +12,7 @@ public class Main {
             ChartParser chartParser = new ChartParser(args[0], args[1], args[2]);
 
             do {
+                System.out.print("Please input a sentence >> ");
                 Scanner input = new Scanner(System.in);
                 String s = input.nextLine();
                 if("exit()".equals(s)) {

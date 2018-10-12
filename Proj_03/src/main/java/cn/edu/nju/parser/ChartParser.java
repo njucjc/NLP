@@ -133,7 +133,7 @@ public class ChartParser {
 
             }
             else {
-                System.out.println("This sentence is illegal.");
+                System.out.println("This sentence is illegal(Rule is not matched).");
                 break;
             }
 
