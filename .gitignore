@@ -5,3 +5,5 @@ out/
 *.log
 *.txt
 */target/
+*/.vscode/
+*/__pycache__/
