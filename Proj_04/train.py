@@ -6,21 +6,9 @@ from utils import *
 
 
 # Make up some training data
-training_data = [(
-    "the wall street journal reported today that apple corporation made money".split(),
-    "B I I I O O O B I O O".split()
-), (
-    "georgia tech is a university in georgia".split(),
-    "B I O O O O B".split()
-)]
+training_data = load_training_data('data/train.txt')
 
-word_to_ix = {}
-for sentence, tags in training_data:
-    for word in sentence:
-        if word not in word_to_ix:
-            word_to_ix[word] = len(word_to_ix)
-
-tag_to_ix = {"B": 0, "I": 1, "O": 2, START_TAG: 3, STOP_TAG: 4}
+word_to_ix = load_dict('data/dict.txt')
 
 model = BiLSTM_CRF(len(word_to_ix), tag_to_ix, EMBEDDING_DIM, HIDDEN_DIM)
 optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay=1e-4)
@@ -41,7 +29,7 @@ for epoch in range(300):  # again, normally you would NOT do 300 epochs, it is t
         # Step 2. Get our inputs ready for the network, that is,
         # turn them into Tensors of word indices.
         sentence_in = prepare_sequence(sentence, word_to_ix)
-        targets = torch.tensor([tag_to_ix[t] for t in tags], dtype=torch.long)
+        targets = prepare_tags(tags, tag_to_ix)
 
         # Step 3. Run our forward pass.
         loss = model.neg_log_likelihood(sentence_in, targets)
@@ -50,6 +38,9 @@ for epoch in range(300):  # again, normally you would NOT do 300 epochs, it is t
         # calling optimizer.step()
         loss.backward()
         optimizer.step()
+
+# Save model
+torch.save(model.state_dict(), "trained_model/model.pkl")
 
 # Check predictions after training
 with torch.no_grad():
