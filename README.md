@@ -20,6 +20,18 @@
 - 非活动边
 - agenda
 
+### Project 4
+
+#### 中文命名实体分析
+- Word Embedding
+- BiLSTM
+- CRF
+#### 参考资料
+- [Word Embedding](http://mccormickml.com/2016/04/19/word2vec-tutorial-the-skip-gram-model/)
+- [ChineseNER](https://github.com/zjy-ucas/ChineseNER)
+- [BiLSTM-CRF模型做基于字的中文命名实体识别](https://www.cnblogs.com/Determined22/p/7238342.html)
+
+
 > 版权所有：正在上NLP课程，注意查重，仅供参考；
 
 
