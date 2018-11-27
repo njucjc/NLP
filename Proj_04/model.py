@@ -1,148 +1,275 @@
-import torch
-import torch.autograd as autograd
-import torch.nn as nn
-import torch.optim as optim
-from utils import *
-from config import *
+# encoding = utf8
+import numpy as np
+import tensorflow as tf
+from tensorflow.contrib.crf import crf_log_likelihood
+from tensorflow.contrib.crf import viterbi_decode
+from tensorflow.contrib.layers.python.layers import initializers
+
+import rnncell as rnn
+from utils import result_to_json
+from data_utils import create_input, iobes_iob
 
 
-class BiLSTM_CRF(nn.Module):
+class Model(object):
+    def __init__(self, config):
 
-    def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim):
-        super(BiLSTM_CRF, self).__init__()
-        self.embedding_dim = embedding_dim
-        self.hidden_dim = hidden_dim
-        self.vocab_size = vocab_size
-        self.tag_to_ix = tag_to_ix
-        self.tagset_size = len(tag_to_ix)
+        self.config = config
+        self.lr = config["lr"]
+        self.char_dim = config["char_dim"]
+        self.lstm_dim = config["lstm_dim"]
+        self.seg_dim = config["seg_dim"]
 
-        self.word_embeds = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim // 2,
-                            num_layers=1, bidirectional=True)
+        self.num_tags = config["num_tags"]
+        self.num_chars = config["num_chars"]
+        self.num_segs = 4
 
-        # Maps the output of the LSTM into tag space.
-        self.hidden2tag = nn.Linear(hidden_dim, self.tagset_size)
+        self.global_step = tf.Variable(0, trainable=False)
+        self.best_dev_f1 = tf.Variable(0.0, trainable=False)
+        self.best_test_f1 = tf.Variable(0.0, trainable=False)
+        self.initializer = initializers.xavier_initializer()
 
-        # Matrix of transition parameters.  Entry i,j is the score of
-        # transitioning *to* i *from* j.
-        self.transitions = nn.Parameter(
-            torch.randn(self.tagset_size, self.tagset_size))
+        # add placeholders for the model
 
-        # These two statements enforce the constraint that we never transfer
-        # to the start tag and we never transfer from the stop tag
-        self.transitions.data[tag_to_ix[START_TAG], :] = -10000
-        self.transitions.data[:, tag_to_ix[STOP_TAG]] = -10000
+        self.char_inputs = tf.placeholder(dtype=tf.int32,
+                                          shape=[None, None],
+                                          name="ChatInputs")
+        self.seg_inputs = tf.placeholder(dtype=tf.int32,
+                                         shape=[None, None],
+                                         name="SegInputs")
 
-        self.hidden = self.init_hidden()
+        self.targets = tf.placeholder(dtype=tf.int32,
+                                      shape=[None, None],
+                                      name="Targets")
+        # dropout keep prob
+        self.dropout = tf.placeholder(dtype=tf.float32,
+                                      name="Dropout")
 
-    def init_hidden(self):
-        return (torch.randn(2, 1, self.hidden_dim // 2),
-                torch.randn(2, 1, self.hidden_dim // 2))
+        used = tf.sign(tf.abs(self.char_inputs))
+        length = tf.reduce_sum(used, reduction_indices=1)
+        self.lengths = tf.cast(length, tf.int32)
+        self.batch_size = tf.shape(self.char_inputs)[0]
+        self.num_steps = tf.shape(self.char_inputs)[-1]
 
-    def _forward_alg(self, feats):
-        # Do the forward algorithm to compute the partition function
-        init_alphas = torch.full((1, self.tagset_size), -10000.)
-        # START_TAG has all of the score.
-        init_alphas[0][self.tag_to_ix[START_TAG]] = 0.
+        # embeddings for chinese character and segmentation representation
+        embedding = self.embedding_layer(self.char_inputs, self.seg_inputs, config)
 
-        # Wrap in a variable so that we will get automatic backprop
-        forward_var = init_alphas
+        # apply dropout before feed to lstm layer
+        lstm_inputs = tf.nn.dropout(embedding, self.dropout)
 
-        # Iterate through the sentence
-        for feat in feats:
-            alphas_t = []  # The forward tensors at this timestep
-            for next_tag in range(self.tagset_size):
-                # broadcast the emission score: it is the same regardless of
-                # the previous tag
-                emit_score = feat[next_tag].view(
-                    1, -1).expand(1, self.tagset_size)
-                # the ith entry of trans_score is the score of transitioning to
-                # next_tag from i
-                trans_score = self.transitions[next_tag].view(1, -1)
-                # The ith entry of next_tag_var is the value for the
-                # edge (i -> next_tag) before we do log-sum-exp
-                next_tag_var = forward_var + trans_score + emit_score
-                # The forward variable for this tag is log-sum-exp of all the
-                # scores.
-                alphas_t.append(log_sum_exp(next_tag_var).view(1))
-            forward_var = torch.cat(alphas_t).view(1, -1)
-        terminal_var = forward_var + self.transitions[self.tag_to_ix[STOP_TAG]]
-        alpha = log_sum_exp(terminal_var)
-        return alpha
+        # bi-directional lstm layer
+        lstm_outputs = self.biLSTM_layer(lstm_inputs, self.lstm_dim, self.lengths)
 
-    def _get_lstm_features(self, sentence):
-        self.hidden = self.init_hidden()
-        embeds = self.word_embeds(sentence).view(len(sentence), 1, -1)
-        lstm_out, self.hidden = self.lstm(embeds, self.hidden)
-        lstm_out = lstm_out.view(len(sentence), self.hidden_dim)
-        lstm_feats = self.hidden2tag(lstm_out)
-        return lstm_feats
+        # logits for tags
+        self.logits = self.project_layer(lstm_outputs)
 
-    def _score_sentence(self, feats, tags):
-        # Gives the score of a provided tag sequence
-        score = torch.zeros(1)
-        tags = torch.cat([torch.tensor([self.tag_to_ix[START_TAG]], dtype=torch.long), tags])
-        for i, feat in enumerate(feats):
-            score = score + \
-                self.transitions[tags[i + 1], tags[i]] + feat[tags[i + 1]]
-        score = score + self.transitions[self.tag_to_ix[STOP_TAG], tags[-1]]
-        return score
+        # loss of the model
+        self.loss = self.loss_layer(self.logits, self.lengths)
 
-    def _viterbi_decode(self, feats):
-        backpointers = []
+        with tf.variable_scope("optimizer"):
+            optimizer = self.config["optimizer"]
+            if optimizer == "sgd":
+                self.opt = tf.train.GradientDescentOptimizer(self.lr)
+            elif optimizer == "adam":
+                self.opt = tf.train.AdamOptimizer(self.lr)
+            elif optimizer == "adgrad":
+                self.opt = tf.train.AdagradOptimizer(self.lr)
+            else:
+                raise KeyError
 
-        # Initialize the viterbi variables in log space
-        init_vvars = torch.full((1, self.tagset_size), -10000.)
-        init_vvars[0][self.tag_to_ix[START_TAG]] = 0
+            # apply grad clip to avoid gradient explosion
+            grads_vars = self.opt.compute_gradients(self.loss)
+            capped_grads_vars = [[tf.clip_by_value(g, -self.config["clip"], self.config["clip"]), v]
+                                 for g, v in grads_vars]
+            self.train_op = self.opt.apply_gradients(capped_grads_vars, self.global_step)
 
-        # forward_var at step i holds the viterbi variables for step i-1
-        forward_var = init_vvars
-        for feat in feats:
-            bptrs_t = []  # holds the backpointers for this step
-            viterbivars_t = []  # holds the viterbi variables for this step
+        # saver of the model
+        self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=5)
 
-            for next_tag in range(self.tagset_size):
-                # next_tag_var[i] holds the viterbi variable for tag i at the
-                # previous step, plus the score of transitioning
-                # from tag i to next_tag.
-                # We don't include the emission scores here because the max
-                # does not depend on them (we add them in below)
-                next_tag_var = forward_var + self.transitions[next_tag]
-                best_tag_id = argmax(next_tag_var)
-                bptrs_t.append(best_tag_id)
-                viterbivars_t.append(next_tag_var[0][best_tag_id].view(1))
-            # Now add in the emission scores, and assign forward_var to the set
-            # of viterbi variables we just computed
-            forward_var = (torch.cat(viterbivars_t) + feat).view(1, -1)
-            backpointers.append(bptrs_t)
+    def embedding_layer(self, char_inputs, seg_inputs, config, name=None):
+        """
+        :param char_inputs: one-hot encoding of sentence
+        :param seg_inputs: segmentation feature
+        :param config: wither use segmentation feature
+        :return: [1, num_steps, embedding size], 
+        """
 
-        # Transition to STOP_TAG
-        terminal_var = forward_var + self.transitions[self.tag_to_ix[STOP_TAG]]
-        best_tag_id = argmax(terminal_var)
-        path_score = terminal_var[0][best_tag_id]
+        embedding = []
+        with tf.variable_scope("char_embedding" if not name else name), tf.device('/cpu:0'):
+            self.char_lookup = tf.get_variable(
+                    name="char_embedding",
+                    shape=[self.num_chars, self.char_dim],
+                    initializer=self.initializer)
+            embedding.append(tf.nn.embedding_lookup(self.char_lookup, char_inputs))
+            if config["seg_dim"]:
+                with tf.variable_scope("seg_embedding"), tf.device('/cpu:0'):
+                    self.seg_lookup = tf.get_variable(
+                        name="seg_embedding",
+                        shape=[self.num_segs, self.seg_dim],
+                        initializer=self.initializer)
+                    embedding.append(tf.nn.embedding_lookup(self.seg_lookup, seg_inputs))
+            embed = tf.concat(embedding, axis=-1)
+        return embed
 
-        # Follow the back pointers to decode the best path.
-        best_path = [best_tag_id]
-        for bptrs_t in reversed(backpointers):
-            best_tag_id = bptrs_t[best_tag_id]
-            best_path.append(best_tag_id)
-        # Pop off the start tag (we dont want to return that to the caller)
-        start = best_path.pop()
-        assert start == self.tag_to_ix[START_TAG]  # Sanity check
-        best_path.reverse()
-        return path_score, best_path
+    def biLSTM_layer(self, lstm_inputs, lstm_dim, lengths, name=None):
+        """
+        :param lstm_inputs: [batch_size, num_steps, emb_size] 
+        :return: [batch_size, num_steps, 2*lstm_dim] 
+        """
+        with tf.variable_scope("char_BiLSTM" if not name else name):
+            lstm_cell = {}
+            for direction in ["forward", "backward"]:
+                with tf.variable_scope(direction):
+                    lstm_cell[direction] = rnn.CoupledInputForgetGateLSTMCell(
+                        lstm_dim,
+                        use_peepholes=True,
+                        initializer=self.initializer,
+                        state_is_tuple=True)
+            outputs, final_states = tf.nn.bidirectional_dynamic_rnn(
+                lstm_cell["forward"],
+                lstm_cell["backward"],
+                lstm_inputs,
+                dtype=tf.float32,
+                sequence_length=lengths)
+        return tf.concat(outputs, axis=2)
 
-    def neg_log_likelihood(self, sentence, tags):
-        feats = self._get_lstm_features(sentence)
-        forward_score = self._forward_alg(feats)
-        gold_score = self._score_sentence(feats, tags)
-        return forward_score - gold_score
+    def project_layer(self, lstm_outputs, name=None):
+        """
+        hidden layer between lstm layer and logits
+        :param lstm_outputs: [batch_size, num_steps, emb_size] 
+        :return: [batch_size, num_steps, num_tags]
+        """
+        with tf.variable_scope("project"  if not name else name):
+            with tf.variable_scope("hidden"):
+                W = tf.get_variable("W", shape=[self.lstm_dim*2, self.lstm_dim],
+                                    dtype=tf.float32, initializer=self.initializer)
 
-    def forward(self, sentence):  # dont confuse this with _forward_alg above.
-        # Get the emission scores from the BiLSTM
-        lstm_feats = self._get_lstm_features(sentence)
+                b = tf.get_variable("b", shape=[self.lstm_dim], dtype=tf.float32,
+                                    initializer=tf.zeros_initializer())
+                output = tf.reshape(lstm_outputs, shape=[-1, self.lstm_dim*2])
+                hidden = tf.tanh(tf.nn.xw_plus_b(output, W, b))
 
-        # Find the best path, given the features.
-        score, tag_seq = self._viterbi_decode(lstm_feats)
-        return score, tag_seq
+            # project to score of tags
+            with tf.variable_scope("logits"):
+                W = tf.get_variable("W", shape=[self.lstm_dim, self.num_tags],
+                                    dtype=tf.float32, initializer=self.initializer)
 
+                b = tf.get_variable("b", shape=[self.num_tags], dtype=tf.float32,
+                                    initializer=tf.zeros_initializer())
+
+                pred = tf.nn.xw_plus_b(hidden, W, b)
+
+            return tf.reshape(pred, [-1, self.num_steps, self.num_tags])
+
+    def loss_layer(self, project_logits, lengths, name=None):
+        """
+        calculate crf loss
+        :param project_logits: [1, num_steps, num_tags]
+        :return: scalar loss
+        """
+        with tf.variable_scope("crf_loss"  if not name else name):
+            small = -1000.0
+            # pad logits for crf loss
+            start_logits = tf.concat(
+                [small * tf.ones(shape=[self.batch_size, 1, self.num_tags]), tf.zeros(shape=[self.batch_size, 1, 1])], axis=-1)
+            pad_logits = tf.cast(small * tf.ones([self.batch_size, self.num_steps, 1]), tf.float32)
+            logits = tf.concat([project_logits, pad_logits], axis=-1)
+            logits = tf.concat([start_logits, logits], axis=1)
+            targets = tf.concat(
+                [tf.cast(self.num_tags*tf.ones([self.batch_size, 1]), tf.int32), self.targets], axis=-1)
+
+            self.trans = tf.get_variable(
+                "transitions",
+                shape=[self.num_tags + 1, self.num_tags + 1],
+                initializer=self.initializer)
+            log_likelihood, self.trans = crf_log_likelihood(
+                inputs=logits,
+                tag_indices=targets,
+                transition_params=self.trans,
+                sequence_lengths=lengths+1)
+            return tf.reduce_mean(-log_likelihood)
+
+    def create_feed_dict(self, is_train, batch):
+        """
+        :param is_train: Flag, True for train batch
+        :param batch: list train/evaluate data 
+        :return: structured data to feed
+        """
+        _, chars, segs, tags = batch
+        feed_dict = {
+            self.char_inputs: np.asarray(chars),
+            self.seg_inputs: np.asarray(segs),
+            self.dropout: 1.0,
+        }
+        if is_train:
+            feed_dict[self.targets] = np.asarray(tags)
+            feed_dict[self.dropout] = self.config["dropout_keep"]
+        return feed_dict
+
+    def run_step(self, sess, is_train, batch):
+        """
+        :param sess: session to run the batch
+        :param is_train: a flag indicate if it is a train batch
+        :param batch: a dict containing batch data
+        :return: batch result, loss of the batch or logits
+        """
+        feed_dict = self.create_feed_dict(is_train, batch)
+        if is_train:
+            global_step, loss, _ = sess.run(
+                [self.global_step, self.loss, self.train_op],
+                feed_dict)
+            return global_step, loss
+        else:
+            lengths, logits = sess.run([self.lengths, self.logits], feed_dict)
+            return lengths, logits
+
+    def decode(self, logits, lengths, matrix):
+        """
+        :param logits: [batch_size, num_steps, num_tags]float32, logits
+        :param lengths: [batch_size]int32, real length of each sequence
+        :param matrix: transaction matrix for inference
+        :return:
+        """
+        # inference final labels usa viterbi Algorithm
+        paths = []
+        small = -1000.0
+        start = np.asarray([[small]*self.num_tags +[0]])
+        for score, length in zip(logits, lengths):
+            score = score[:length]
+            pad = small * np.ones([length, 1])
+            logits = np.concatenate([score, pad], axis=1)
+            logits = np.concatenate([start, logits], axis=0)
+            path, _ = viterbi_decode(logits, matrix)
+
+            paths.append(path[1:])
+        return paths
+
+    def evaluate(self, sess, data_manager, id_to_tag):
+        """
+        :param sess: session  to run the model 
+        :param data: list of data
+        :param id_to_tag: index to tag name
+        :return: evaluate result
+        """
+        results = []
+        trans = self.trans.eval()
+        for batch in data_manager.iter_batch():
+            strings = batch[0]
+            tags = batch[-1]
+            lengths, scores = self.run_step(sess, False, batch)
+            batch_paths = self.decode(scores, lengths, trans)
+            for i in range(len(strings)):
+                result = []
+                string = strings[i][:lengths[i]]
+                gold = iobes_iob([id_to_tag[int(x)] for x in tags[i][:lengths[i]]])
+                pred = iobes_iob([id_to_tag[int(x)] for x in batch_paths[i][:lengths[i]]])
+                for char, gold, pred in zip(string, gold, pred):
+                    result.append(" ".join([char, gold, pred]))
+                results.append(result)
+        return results
+
+    def evaluate_line(self, sess, inputs, id_to_tag):
+        trans = self.trans.eval()
+        lengths, scores = self.run_step(sess, False, inputs)
+        batch_paths = self.decode(scores, lengths, trans)
+        tags = [id_to_tag[idx] for idx in batch_paths[0]]
+        return result_to_json(inputs[0][0], tags)
